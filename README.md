@@ -32,6 +32,11 @@ npm run dev
 ## Deployment
 Deploy to Vercel and set the env vars above. The app is static and uses Supabase Storage directly.
 
+## Routes
+- `/` Guided documentation upload workflow
+- `/dashboard` Storage browser for uploaded folders and files
+- `/doashboard` Alias to dashboard
+
 ## Folder Structure
 Uploads go to:
 
