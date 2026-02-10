@@ -20,6 +20,7 @@ function Dashboard() {
   const [selectedSerial, setSelectedSerial] = useState('')
   const [selectedContext, setSelectedContext] = useState('')
   const [loading, setLoading] = useState(false)
+  const [openingFileName, setOpeningFileName] = useState('')
   const [error, setError] = useState('')
 
   const activePath = useMemo(() => {
@@ -119,6 +120,38 @@ function Dashboard() {
     loadFiles()
   }, [selectedType, selectedSerial, selectedContext])
 
+  const openFile = async (fileName) => {
+    if (!supabase) return
+
+    const objectPath = `${selectedType}/${selectedSerial}/${selectedContext}/${fileName}`
+    setError('')
+    setOpeningFileName(fileName)
+
+    try {
+      const { data, error: signedError } = await supabase.storage
+        .from(SUPABASE_BUCKET)
+        .createSignedUrl(objectPath, 60 * 60)
+
+      if (!signedError && data?.signedUrl) {
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+        return
+      }
+
+      // Fallback for public buckets.
+      const { data: publicData } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(objectPath)
+      if (publicData?.publicUrl) {
+        window.open(publicData.publicUrl, '_blank', 'noopener,noreferrer')
+        return
+      }
+
+      throw signedError || new Error('Could not create a URL for this file.')
+    } catch (err) {
+      setError(err.message || 'Failed to open file.')
+    } finally {
+      setOpeningFileName('')
+    }
+  }
+
   return (
     <div className="app">
       <header className="app-header">
@@ -201,16 +234,18 @@ function Dashboard() {
             <div className="file-list">
               <h3>Files</h3>
               {files.length === 0 && !loading && <p className="hint">No files found in this folder.</p>}
-              {files.map((file) => {
-                const objectPath = `${selectedType}/${selectedSerial}/${selectedContext}/${file.name}`
-                const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(objectPath)
-                return (
-                  <a key={file.name} href={data.publicUrl} target="_blank" rel="noreferrer" className="file-item">
-                    <span>{file.name}</span>
-                    <em>{file.metadata?.size || 0} bytes</em>
-                  </a>
-                )
-              })}
+              {files.map((file) => (
+                <button
+                  key={file.name}
+                  type="button"
+                  className="file-item"
+                  onClick={() => openFile(file.name)}
+                  disabled={openingFileName === file.name}
+                >
+                  <span>{openingFileName === file.name ? 'Opening...' : file.name}</span>
+                  <em>{file.metadata?.size || 0} bytes</em>
+                </button>
+              ))}
             </div>
           )}
         </section>
