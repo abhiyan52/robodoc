@@ -1,0 +1,18 @@
+{
+  "Incoming": {
+    "SCARA": [
+      { "id": 1, "label": "Packaging – left side", "required": true },
+      { "id": 2, "label": "Packaging – right side", "required": true },
+      { "id": 3, "label": "Delivery note", "required": true },
+      { "id": 4, "label": "Robot serial label", "required": true },
+      { "id": 5, "label": "Visible damage (if any)", "required": false }
+    ],
+    "IVR": [
+      { "id": 1, "label": "Packaging – left side", "required": true },
+      { "id": 2, "label": "Packaging – battery bay", "required": true },
+      { "id": 3, "label": "Delivery note", "required": true },
+      { "id": 4, "label": "Robot serial label", "required": true },
+      { "id": 5, "label": "Visible damage (if any)", "required": false }
+    ]
+  }
+}

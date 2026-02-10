@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import './App.css'
 import { supabase, SUPABASE_BUCKET } from './supabaseClient'
 import { buildManifest } from './manifest'
+import checklists from './assets/checklists.json'
 
 const CONTEXTS = [
   { key: 'Incoming', label: 'Incoming Goods', enabled: true },
@@ -11,13 +12,11 @@ const CONTEXTS = [
   { key: 'Delivery', label: 'Delivery', enabled: false },
 ]
 
-const INCOMING_CHECKLIST = [
-  { id: 1, label: 'Packaging – left side', required: true },
-  { id: 2, label: 'Packaging – right side', required: true },
-  { id: 3, label: 'Delivery note', required: true },
-  { id: 4, label: 'Robot serial label', required: true },
-  { id: 5, label: 'Visible damage (if any)', required: false },
-]
+const getChecklistFor = (context, type) => {
+  const byContext = checklists?.[context]
+  if (!byContext) return []
+  return byContext[type] || byContext.SCARA || []
+}
 
 function generateFileName(serial, context, step, index) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -95,11 +94,7 @@ function App() {
 
   const handleContextSelect = (ctx) => {
     setContextKey(ctx.key)
-    if (ctx.key === 'Incoming') {
-      setChecklist(INCOMING_CHECKLIST)
-    } else {
-      setChecklist([])
-    }
+    setChecklist(getChecklistFor(ctx.key, robotType))
     setCurrentStepIndex(0)
     setPhotosByStep({})
     setScreen(2)
