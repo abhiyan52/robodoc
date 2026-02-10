@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import './App.css'
 import { supabase, SUPABASE_BUCKET } from './supabaseClient'
+import { buildManifest } from './manifest'
 
 const CONTEXTS = [
   { key: 'Incoming', label: 'Incoming Goods', enabled: true },
@@ -38,11 +39,14 @@ function App() {
   const [robotSerial, setRobotSerial] = useState('')
   const [robotType, setRobotType] = useState('SCARA')
   const [contextKey, setContextKey] = useState('')
+  const [workflowStartedAt, setWorkflowStartedAt] = useState('')
   const [checklist, setChecklist] = useState([])
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [photosByStep, setPhotosByStep] = useState({})
   const [uploadingStepId, setUploadingStepId] = useState(null)
   const [uploadError, setUploadError] = useState('')
+  const [manifestError, setManifestError] = useState('')
+  const [saveSuccess, setSaveSuccess] = useState(false)
   const photosRef = useRef({})
 
   const activeStep = checklist[currentStepIndex]
@@ -76,9 +80,16 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!saveSuccess) return undefined
+    const timer = setTimeout(() => setSaveSuccess(false), 4000)
+    return () => clearTimeout(timer)
+  }, [saveSuccess])
+
   const startEnabled = robotSerial.trim().length > 0 && robotType
 
   const handleStart = () => {
+    setWorkflowStartedAt(new Date().toISOString())
     setScreen(1)
   }
 
@@ -98,6 +109,7 @@ function App() {
     setRobotSerial('')
     setRobotType('SCARA')
     setContextKey('')
+    setWorkflowStartedAt('')
     setChecklist([])
     setCurrentStepIndex(0)
     setPhotosByStep({})
@@ -146,6 +158,9 @@ function App() {
 
     const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(path)
     const previewUrl = URL.createObjectURL(file)
+    const capturedAt = new Date().toISOString()
+    const sizeBytes = file.size
+    const mimeType = file.type || 'image/jpeg'
 
     setPhotosByStep((prev) => {
       const current = prev[activeStep.id] || []
@@ -158,11 +173,55 @@ function App() {
             path,
             url: data?.publicUrl || '',
             previewUrl,
+            capturedAt,
+            sizeBytes,
+            mimeType,
           },
         ],
       }
     })
     setUploadingStepId(null)
+  }
+
+  const handleFinish = async () => {
+    setManifestError('')
+    if (!supabase) {
+      setManifestError(
+        'Missing Supabase configuration. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
+      )
+      resetSession()
+      return
+    }
+
+    const completedAt = new Date().toISOString()
+    // Capture a self-contained record of this run before clearing local state.
+    const manifest = buildManifest({
+      robot: { serial: robotSerial, type: robotType },
+      context: contextKey,
+      checklist,
+      uploadsByStep: photosByStep,
+      workflowStartedAt,
+      bucket: SUPABASE_BUCKET,
+      completedAt,
+    })
+    const basePath = `${robotType}/${robotSerial}/${contextKey}`
+    const payload = JSON.stringify(manifest, null, 2)
+    const manifestFile = new Blob([payload], { type: 'application/json' })
+
+    const { error } = await supabase.storage
+      .from(SUPABASE_BUCKET)
+      .upload(`${basePath}/manifest.json`, manifestFile, {
+        contentType: 'application/json',
+        upsert: true,
+      })
+
+    if (error) {
+      setManifestError(`Manifest upload failed: ${error.message}`)
+    } else {
+      setSaveSuccess(true)
+    }
+
+    resetSession()
   }
 
   const goNextStep = () => {
@@ -200,12 +259,14 @@ function App() {
       </header>
 
       <main className="app-main">
+        {saveSuccess && <div className="toast">Records saved successfully.</div>}
         {screen === 0 && (
           <section className="panel">
             <h2>Start / Identification</h2>
             <p className="panel-sub">
               Anchor the session to a robot. In production this would validate against ERP.
             </p>
+            {manifestError && <p className="error">{manifestError}</p>}
             <div className="field">
               <label htmlFor="serial">Robot Serial Number</label>
               <input
@@ -318,7 +379,10 @@ function App() {
               <button
                 className="primary"
                 onClick={goNextStep}
-                disabled={activeStep.required && !(photosByStep[activeStep.id]?.length > 0)}
+                disabled={
+                  uploadingStepId === activeStep.id ||
+                  (activeStep.required && !(photosByStep[activeStep.id]?.length > 0))
+                }
               >
                 {currentStepIndex === checklist.length - 1 ? 'Review' : 'Next'}
               </button>
@@ -338,9 +402,13 @@ function App() {
                 return (
                   <div key={step.id} className="summary-item">
                     <span>{step.label}</span>
-                    <strong className={hasPhoto ? 'ok' : 'bad'}>
-                      {hasPhoto ? '✅' : '❌'}
-                    </strong>
+                    {uploadingStepId === step.id ? (
+                      <strong className="pending">Uploading…</strong>
+                    ) : (
+                      <strong className={hasPhoto ? 'ok' : 'bad'}>
+                        {hasPhoto ? '✅' : '❌'}
+                      </strong>
+                    )}
                   </div>
                 )
               })}
@@ -361,7 +429,7 @@ function App() {
               <button className="ghost" onClick={() => setScreen(2)}>
                 Back to Checklist
               </button>
-              <button className="primary" onClick={resetSession}>
+              <button className="primary" onClick={handleFinish}>
                 Finish
               </button>
             </div>

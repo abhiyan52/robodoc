@@ -29,6 +29,8 @@ function Dashboard() {
   const [downloadingFileName, setDownloadingFileName] = useState('')
   const [previewUrls, setPreviewUrls] = useState({})
   const [error, setError] = useState('')
+  const [manifestPreview, setManifestPreview] = useState('')
+  const [manifestLoading, setManifestLoading] = useState(false)
 
   const activePath = useMemo(() => {
     const parts = [selectedType, selectedSerial, selectedContext].filter(Boolean)
@@ -110,10 +112,12 @@ function Dashboard() {
     async function loadFiles() {
       if (!selectedType || !selectedSerial || !selectedContext) {
         setFiles([])
+        setManifestPreview('')
         return
       }
       setLoading(true)
       setError('')
+      setManifestPreview('')
       try {
         const path = `${selectedType}/${selectedSerial}/${selectedContext}`
         const entries = await listAtPath(path)
@@ -160,6 +164,32 @@ function Dashboard() {
 
     loadPreviews()
   }, [files, selectedType, selectedSerial, selectedContext])
+
+  const manifestFile = useMemo(
+    () => files.find((file) => file.name === 'manifest.json'),
+    [files]
+  )
+
+  const loadManifestPreview = async () => {
+    if (!supabase || !manifestFile) return
+    setManifestLoading(true)
+    setError('')
+    try {
+      const objectPath = `${selectedType}/${selectedSerial}/${selectedContext}/${manifestFile.name}`
+      const { data: blob, error: downloadError } = await supabase.storage
+        .from(SUPABASE_BUCKET)
+        .download(objectPath)
+      if (downloadError || !blob) {
+        throw downloadError || new Error('Could not download manifest.')
+      }
+      const text = await blob.text()
+      setManifestPreview(text)
+    } catch (err) {
+      setError(err.message || 'Failed to load manifest.')
+    } finally {
+      setManifestLoading(false)
+    }
+  }
 
   const downloadFile = async (fileName) => {
     if (!supabase) return
@@ -270,6 +300,35 @@ function Dashboard() {
           {selectedContext && (
             <div className="file-list">
               <h3>Files</h3>
+              {manifestFile && (
+                <div className="manifest-card">
+                  <div>
+                    <strong>manifest.json</strong>
+                    <p className="hint">Workflow summary for this folder.</p>
+                  </div>
+                  <div className="manifest-actions">
+                    <button
+                      type="button"
+                      className="ghost download-btn"
+                      onClick={() => downloadFile(manifestFile.name)}
+                      disabled={downloadingFileName === manifestFile.name}
+                    >
+                      {downloadingFileName === manifestFile.name ? 'Downloading...' : 'Download'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost download-btn"
+                      onClick={loadManifestPreview}
+                      disabled={manifestLoading}
+                    >
+                      {manifestLoading ? 'Loading...' : 'View JSON'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {manifestPreview && (
+                <pre className="manifest-preview">{manifestPreview}</pre>
+              )}
               {files.length === 0 && !loading && <p className="hint">No files found in this folder.</p>}
               <div className="preview-grid">
                 {files.map((file) => (
