@@ -184,7 +184,6 @@ function App() {
       setManifestError(
         'Missing Supabase configuration. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
       )
-      resetSession()
       return
     }
 
@@ -200,22 +199,61 @@ function App() {
       completedAt,
     })
     const basePath = `${robotType}/${robotSerial}/${contextKey}`
-    const payload = JSON.stringify(manifest, null, 2)
-    const manifestFile = new Blob([payload], { type: 'application/json' })
+    const manifestPath = `${basePath}/manifest.json`
+    const storage = supabase.storage.from(SUPABASE_BUCKET)
 
-    const { error } = await supabase.storage
-      .from(SUPABASE_BUCKET)
-      .upload(`${basePath}/manifest.json`, manifestFile, {
-        contentType: 'application/json',
-        upsert: true,
-      })
+    // Edit-only flow: manifest must already exist to avoid insert RLS failures.
+    const { data: existingManifestBlob, error: readError } = await storage.download(manifestPath)
+    if (readError) {
+      const readMessage = (readError.message || '').toLowerCase()
+      const isMissingManifest =
+        readError.statusCode === '404' ||
+        readError.statusCode === 404 ||
+        readMessage.includes('not found')
 
-    if (error) {
-      setManifestError(`Manifest upload failed: ${error.message}`)
-    } else {
-      setSaveSuccess(true)
+      if (isMissingManifest) {
+        setManifestError(
+          `Manifest update skipped: ${manifestPath} does not exist yet. Create it once (with insert permission), then future runs can edit it.`
+        )
+      } else {
+        setManifestError(`Manifest read failed: ${readError.message}`)
+      }
+      return
     }
 
+    let manifestToSave = manifest
+    if (existingManifestBlob) {
+      try {
+        const existingText = await existingManifestBlob.text()
+        const existingManifest = JSON.parse(existingText)
+
+        manifestToSave = {
+          ...manifest,
+          workflow: {
+            ...manifest.workflow,
+            // Preserve workflow id/start from the first manifest, if present.
+            id: existingManifest?.workflow?.id || manifest.workflow.id,
+            started_at: existingManifest?.workflow?.started_at || manifest.workflow.started_at,
+          },
+        }
+      } catch {
+        // If existing JSON is malformed, overwrite with a fresh valid manifest.
+      }
+    }
+
+    const payload = JSON.stringify(manifestToSave, null, 2)
+    const manifestFile = new Blob([payload], { type: 'application/json' })
+
+    const { error: updateError } = await storage.update(manifestPath, manifestFile, {
+      contentType: 'application/json',
+    })
+
+    if (updateError) {
+      setManifestError(`Manifest update failed: ${updateError.message}`)
+      return
+    }
+
+    setSaveSuccess(true)
     resetSession()
   }
 
