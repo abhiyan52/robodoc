@@ -11,6 +11,12 @@ function getFiles(entries) {
   return (entries || []).filter((entry) => !!entry.metadata)
 }
 
+function isImageFile(file) {
+  const mime = file?.metadata?.mimetype || ''
+  if (mime.startsWith('image/')) return true
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file?.name || '')
+}
+
 function Dashboard() {
   const [robotTypes, setRobotTypes] = useState([])
   const [serials, setSerials] = useState([])
@@ -20,7 +26,8 @@ function Dashboard() {
   const [selectedSerial, setSelectedSerial] = useState('')
   const [selectedContext, setSelectedContext] = useState('')
   const [loading, setLoading] = useState(false)
-  const [openingFileName, setOpeningFileName] = useState('')
+  const [downloadingFileName, setDownloadingFileName] = useState('')
+  const [previewUrls, setPreviewUrls] = useState({})
   const [error, setError] = useState('')
 
   const activePath = useMemo(() => {
@@ -120,35 +127,65 @@ function Dashboard() {
     loadFiles()
   }, [selectedType, selectedSerial, selectedContext])
 
-  const openFile = async (fileName) => {
+  useEffect(() => {
+    async function loadPreviews() {
+      if (!supabase || !selectedType || !selectedSerial || !selectedContext || files.length === 0) {
+        setPreviewUrls({})
+        return
+      }
+
+      const imageFiles = files.filter((file) => isImageFile(file))
+      if (imageFiles.length === 0) {
+        setPreviewUrls({})
+        return
+      }
+
+      const nextPreviewUrls = {}
+
+      await Promise.all(
+        imageFiles.map(async (file) => {
+          const objectPath = `${selectedType}/${selectedSerial}/${selectedContext}/${file.name}`
+          const { data, error: signedError } = await supabase.storage
+            .from(SUPABASE_BUCKET)
+            .createSignedUrl(objectPath, 60 * 60)
+
+          if (!signedError && data?.signedUrl) {
+            nextPreviewUrls[file.name] = data.signedUrl
+          }
+        })
+      )
+
+      setPreviewUrls(nextPreviewUrls)
+    }
+
+    loadPreviews()
+  }, [files, selectedType, selectedSerial, selectedContext])
+
+  const downloadFile = async (fileName) => {
     if (!supabase) return
 
     const objectPath = `${selectedType}/${selectedSerial}/${selectedContext}/${fileName}`
     setError('')
-    setOpeningFileName(fileName)
+    setDownloadingFileName(fileName)
 
     try {
-      const { data, error: signedError } = await supabase.storage
-        .from(SUPABASE_BUCKET)
-        .createSignedUrl(objectPath, 60 * 60)
-
-      if (!signedError && data?.signedUrl) {
-        window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
-        return
+      const { data: blob, error: downloadError } = await supabase.storage.from(SUPABASE_BUCKET).download(objectPath)
+      if (downloadError || !blob) {
+        throw downloadError || new Error('Could not download file.')
       }
 
-      // Fallback for public buckets.
-      const { data: publicData } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(objectPath)
-      if (publicData?.publicUrl) {
-        window.open(publicData.publicUrl, '_blank', 'noopener,noreferrer')
-        return
-      }
-
-      throw signedError || new Error('Could not create a URL for this file.')
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = fileName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
     } catch (err) {
-      setError(err.message || 'Failed to open file.')
+      setError(err.message || 'Failed to download file.')
     } finally {
-      setOpeningFileName('')
+      setDownloadingFileName('')
     }
   }
 
@@ -234,18 +271,31 @@ function Dashboard() {
             <div className="file-list">
               <h3>Files</h3>
               {files.length === 0 && !loading && <p className="hint">No files found in this folder.</p>}
-              {files.map((file) => (
-                <button
-                  key={file.name}
-                  type="button"
-                  className="file-item"
-                  onClick={() => openFile(file.name)}
-                  disabled={openingFileName === file.name}
-                >
-                  <span>{openingFileName === file.name ? 'Opening...' : file.name}</span>
-                  <em>{file.metadata?.size || 0} bytes</em>
-                </button>
-              ))}
+              <div className="preview-grid">
+                {files.map((file) => (
+                  <article key={file.name} className="preview-card">
+                    <div className="preview-media">
+                      {isImageFile(file) && previewUrls[file.name] ? (
+                        <img src={previewUrls[file.name]} alt={file.name} />
+                      ) : (
+                        <div className="preview-placeholder">No preview</div>
+                      )}
+                    </div>
+                    <p className="preview-name">{file.name}</p>
+                    <div className="preview-footer">
+                      <em>{file.metadata?.size || 0} bytes</em>
+                      <button
+                        type="button"
+                        className="ghost download-btn"
+                        onClick={() => downloadFile(file.name)}
+                        disabled={downloadingFileName === file.name}
+                      >
+                        {downloadingFileName === file.name ? 'Downloading...' : 'Download'}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
             </div>
           )}
         </section>

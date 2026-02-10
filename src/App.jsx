@@ -94,6 +94,18 @@ function App() {
     setScreen(2)
   }
 
+  const resetSession = () => {
+    setRobotSerial('')
+    setRobotType('SCARA')
+    setContextKey('')
+    setChecklist([])
+    setCurrentStepIndex(0)
+    setPhotosByStep({})
+    setUploadingStepId(null)
+    setUploadError('')
+    setScreen(0)
+  }
+
   const handleUpload = async (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -349,7 +361,7 @@ function App() {
               <button className="ghost" onClick={() => setScreen(2)}>
                 Back to Checklist
               </button>
-              <button className="primary" onClick={() => setScreen(0)}>
+              <button className="primary" onClick={resetSession}>
                 Finish
               </button>
             </div>

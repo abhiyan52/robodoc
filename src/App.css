@@ -390,22 +390,66 @@ input[type='text'] {
   font-size: 16px;
 }
 
-.file-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  margin-bottom: 8px;
-  text-decoration: none;
-  color: inherit;
-  background: #fff;
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
-.file-item em {
+.preview-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-media {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f8fafc;
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-media img {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+}
+
+.preview-placeholder {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.preview-name {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.preview-footer em {
   font-style: normal;
   color: #64748b;
+  font-size: 12px;
+}
+
+.download-btn {
+  padding: 6px 10px;
   font-size: 12px;
 }
 
