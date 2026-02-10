@@ -33,6 +33,29 @@ function formatStepForName(label) {
     .replace(/-+/g, '-')
 }
 
+function getNextManifestFileName(entries) {
+  const manifestNames = (entries || [])
+    .map((entry) => entry.name)
+    .filter((name) => /^manifest(?:_(\d+))?\.json$/i.test(name))
+
+  if (manifestNames.length === 0) return 'manifest.json'
+
+  let maxVersion = 0
+  manifestNames.forEach((name) => {
+    if (/^manifest\.json$/i.test(name)) {
+      maxVersion = Math.max(maxVersion, 1)
+      return
+    }
+
+    const match = name.match(/^manifest_(\d+)\.json$/i)
+    if (match?.[1]) {
+      maxVersion = Math.max(maxVersion, Number(match[1]))
+    }
+  })
+
+  return `manifest_${Math.max(2, maxVersion + 1)}.json`
+}
+
 function App() {
   const [screen, setScreen] = useState(0)
   const [robotSerial, setRobotSerial] = useState('')
@@ -45,6 +68,7 @@ function App() {
   const [uploadingStepId, setUploadingStepId] = useState(null)
   const [uploadError, setUploadError] = useState('')
   const [manifestError, setManifestError] = useState('')
+  const [savingManifest, setSavingManifest] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const photosRef = useRef({})
 
@@ -179,6 +203,7 @@ function App() {
   }
 
   const handleFinish = async () => {
+    if (savingManifest) return
     setManifestError('')
     if (!supabase) {
       setManifestError(
@@ -187,6 +212,7 @@ function App() {
       return
     }
 
+    setSavingManifest(true)
     const completedAt = new Date().toISOString()
     // Capture a self-contained record of this run before clearing local state.
     const manifest = buildManifest({
@@ -199,62 +225,39 @@ function App() {
       completedAt,
     })
     const basePath = `${robotType}/${robotSerial}/${contextKey}`
-    const manifestPath = `${basePath}/manifest.json`
     const storage = supabase.storage.from(SUPABASE_BUCKET)
 
-    // Edit-only flow: manifest must already exist to avoid insert RLS failures.
-    const { data: existingManifestBlob, error: readError } = await storage.download(manifestPath)
-    if (readError) {
-      const readMessage = (readError.message || '').toLowerCase()
-      const isMissingManifest =
-        readError.statusCode === '404' ||
-        readError.statusCode === 404 ||
-        readMessage.includes('not found')
+    try {
+      const { data: entries, error: listError } = await storage.list(basePath, {
+        limit: 200,
+        sortBy: { column: 'name', order: 'asc' },
+      })
 
-      if (isMissingManifest) {
-        setManifestError(
-          `Manifest update skipped: ${manifestPath} does not exist yet. Create it once (with insert permission), then future runs can edit it.`
-        )
-      } else {
-        setManifestError(`Manifest read failed: ${readError.message}`)
+      if (listError) {
+        setManifestError(`Manifest version lookup failed: ${listError.message}`)
+        return
       }
-      return
-    }
 
-    let manifestToSave = manifest
-    if (existingManifestBlob) {
-      try {
-        const existingText = await existingManifestBlob.text()
-        const existingManifest = JSON.parse(existingText)
+      const manifestFileName = getNextManifestFileName(entries)
+      const manifestPath = `${basePath}/${manifestFileName}`
+      const payload = JSON.stringify(manifest, null, 2)
+      const manifestFile = new Blob([payload], { type: 'application/json' })
 
-        manifestToSave = {
-          ...manifest,
-          workflow: {
-            ...manifest.workflow,
-            // Preserve workflow id/start from the first manifest, if present.
-            id: existingManifest?.workflow?.id || manifest.workflow.id,
-            started_at: existingManifest?.workflow?.started_at || manifest.workflow.started_at,
-          },
-        }
-      } catch {
-        // If existing JSON is malformed, overwrite with a fresh valid manifest.
+      const { error: uploadError } = await storage.upload(manifestPath, manifestFile, {
+        contentType: 'application/json',
+        upsert: false,
+      })
+
+      if (uploadError) {
+        setManifestError(`Manifest upload failed: ${uploadError.message}`)
+        return
       }
+
+      setSaveSuccess(true)
+      resetSession()
+    } finally {
+      setSavingManifest(false)
     }
-
-    const payload = JSON.stringify(manifestToSave, null, 2)
-    const manifestFile = new Blob([payload], { type: 'application/json' })
-
-    const { error: updateError } = await storage.update(manifestPath, manifestFile, {
-      contentType: 'application/json',
-    })
-
-    if (updateError) {
-      setManifestError(`Manifest update failed: ${updateError.message}`)
-      return
-    }
-
-    setSaveSuccess(true)
-    resetSession()
   }
 
   const goNextStep = () => {
@@ -462,8 +465,8 @@ function App() {
               <button className="ghost" onClick={() => setScreen(2)}>
                 Back to Checklist
               </button>
-              <button className="primary" onClick={handleFinish}>
-                Finish
+              <button className="primary" onClick={handleFinish} disabled={savingManifest}>
+                {savingManifest ? 'Saving...' : 'Finish'}
               </button>
             </div>
           </section>
